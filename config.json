@@ -1,0 +1,25 @@
+{
+    "api_base_url": "http://localhost:11434",
+    "api_key": "",
+    "model": "llama3.2",
+    "api_mode": "ollama",
+    "temperature": 0.7,
+    "max_tokens": 500,
+    "timeout": 60,
+    "auto_fill_on_new_card": true,
+    "fill_on_focus_lost": true,
+    "delay_between_requests_ms": 500,
+    "toolbar_buttons": {
+        "fill": {
+            "enabled": true,
+            "text": "LLM Fill",
+            "shortcut": ""
+        },
+        "regenerate": {
+            "enabled": true,
+            "text": "LLM Regen",
+            "shortcut": ""
+        }
+    },
+    "note_type_mappings": {}
+}

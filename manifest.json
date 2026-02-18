@@ -1,0 +1,11 @@
+{
+    "name": "LLM Field Generator",
+    "package": "anki_llm_fill",
+    "ankiweb_id": "",
+    "author": "Nexsal",
+    "version": "0.1.0",
+    "homepage": "",
+    "conflicts": [],
+    "mod": 1739842144,
+    "min_point_version": 54
+}

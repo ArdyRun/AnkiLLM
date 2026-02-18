@@ -1,0 +1,79 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "title": "LLM Field Generator Settings",
+    "properties": {
+        "api_base_url": {
+            "type": "string",
+            "title": "API Base URL",
+            "description": "Base URL for the LLM API server. Default is Ollama at localhost.",
+            "default": "http://localhost:11434"
+        },
+        "api_key": {
+            "type": "string",
+            "title": "API Key",
+            "description": "API key for authentication (optional for Ollama, required for OpenAI).",
+            "default": ""
+        },
+        "model": {
+            "type": "string",
+            "title": "Model Name",
+            "description": "Name of the LLM model to use.",
+            "default": "llama3.2"
+        },
+        "api_mode": {
+            "type": "string",
+            "title": "API Mode",
+            "description": "API protocol to use: 'ollama' for Ollama's native API, 'openai' for OpenAI-compatible APIs.",
+            "enum": [
+                "ollama",
+                "openai"
+            ],
+            "default": "ollama"
+        },
+        "temperature": {
+            "type": "number",
+            "title": "Temperature",
+            "description": "Controls randomness of LLM output. Lower = more deterministic.",
+            "default": 0.7,
+            "minimum": 0.0,
+            "maximum": 2.0
+        },
+        "max_tokens": {
+            "type": "integer",
+            "title": "Max Tokens",
+            "description": "Maximum number of tokens in the generated response.",
+            "default": 500,
+            "minimum": 50,
+            "maximum": 4096
+        },
+        "timeout": {
+            "type": "integer",
+            "title": "Timeout (seconds)",
+            "description": "HTTP request timeout in seconds.",
+            "default": 60,
+            "minimum": 10,
+            "maximum": 300
+        },
+        "auto_fill_on_new_card": {
+            "type": "boolean",
+            "title": "Auto-fill on new card",
+            "description": "Automatically generate content when a new card is added.",
+            "default": true
+        },
+        "delay_between_requests_ms": {
+            "type": "integer",
+            "title": "Delay between batch requests (ms)",
+            "description": "Delay in milliseconds between LLM requests during batch processing.",
+            "default": 500,
+            "minimum": 0,
+            "maximum": 10000
+        },
+        "note_type_mappings": {
+            "type": "object",
+            "title": "Note Type Mappings",
+            "description": "Per-note-type configuration for field mappings and prompt templates.",
+            "default": {}
+        }
+    }
+}
