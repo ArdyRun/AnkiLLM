@@ -47,11 +47,25 @@ def get_llm_client(config: dict) -> LLMClient:
     )
 
 
+# ─── Trigger Types ─────────────────────────────────────────────────
+
+ALL_TRIGGERS = ["mining", "add_cards", "browse", "focus_lost", "toolbar"]
+
+
 # ─── Note Matching ─────────────────────────────────────────────────
 
 
-def should_process_note(note: "Note", config: dict) -> Optional[dict]:
+def should_process_note(
+    note: "Note", config: dict, trigger: str = ""
+) -> Optional[dict]:
     """Check if a note should be processed and return its mapping if so.
+
+    Args:
+        note: The Anki note to check.
+        config: Addon configuration dict.
+        trigger: Which trigger is calling (e.g. 'mining', 'add_cards',
+                 'browse', 'focus_lost', 'toolbar'). If empty, skip
+                 trigger check.
 
     Returns:
         The mapping dict for this note type, or None if not applicable.
@@ -67,6 +81,12 @@ def should_process_note(note: "Note", config: dict) -> Optional[dict]:
         return None
 
     mapping = mappings[note_type_name]
+
+    # Check trigger permission
+    if trigger:
+        allowed = mapping.get("triggered_by", ALL_TRIGGERS)
+        if trigger not in allowed:
+            return None
 
     # Validate that fields exist on this note type
     field_names = [f["name"] for f in note_type["flds"]]
@@ -166,29 +186,19 @@ def _apply_and_save_batch_op(
 # ─── Hook Handler: Auto-fill on new card ──────────────────────────
 
 
-def on_note_added(note: "Note"):
-    """Hook handler: called when a new note is added.
-
-    Two-phase approach:
-    1. QueryOp (no collection lock): Make LLM API call
-    2. CollectionOp (with lock): Save results to note with undo
-    """
+def _run_async_fill(note: "Note", trigger: str):
+    """Common async fill: QueryOp (LLM) → CollectionOp (save+undo)."""
     assert mw is not None
     config = get_config()
 
-    if not config.get("auto_fill_on_new_card", True):
-        return
-
-    mapping = should_process_note(note, config)
+    mapping = should_process_note(note, config, trigger=trigger)
     if mapping is None:
         return
 
     def do_llm_call(_col) -> dict:
-        """Phase 1: Generate via LLM (no collection lock)."""
         return generate_fields_for_note(note, mapping, config)
 
     def on_llm_done(generated: dict):
-        """Phase 2: Apply results and save with undo."""
         if not generated:
             return
         CollectionOp(
@@ -208,6 +218,28 @@ def on_note_added(note: "Note"):
     ).failure(
         on_llm_error,
     ).without_collection().run_in_background()
+
+
+def on_note_added(note: "Note"):
+    """Hook: add_cards_did_add_note (manual Add Cards dialog)."""
+    _run_async_fill(note, trigger="add_cards")
+
+
+# ─── Hook Handler: Mining (Yomitan / AnkiConnect) ─────────────────
+
+
+def on_note_will_be_added(
+    _col: "Collection", note: "Note", _deck_id
+) -> None:
+    """Hook: note_will_be_added.
+
+    Fires for ALL note additions including AnkiConnect/Yomitan.
+    Since this is synchronous, we schedule async LLM processing
+    to run after the note is saved.
+    """
+    assert mw is not None
+    # Schedule on main thread after current operation completes
+    mw.taskman.run_on_main(lambda: _run_async_fill(note, trigger="mining"))
 
 
 # ─── Hook Handler: Live fill on focus lost ─────────────────────────
@@ -240,10 +272,7 @@ def on_focus_lost(changed: bool, note: "Note", field_idx: int) -> bool:
     assert mw is not None
     config = get_config()
 
-    if not config.get("fill_on_focus_lost", True):
-        return changed
-
-    mapping = should_process_note(note, config)
+    mapping = should_process_note(note, config, trigger="focus_lost")
     if mapping is None:
         return changed
 

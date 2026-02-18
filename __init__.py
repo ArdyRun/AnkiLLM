@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from aqt.editor import Editor
 
 
-# ─── Hook: Auto-fill on new card ──────────────────────────────────
+# ─── Hook: Auto-fill on new card (Add Cards dialog) ──────────────
 
 def _on_note_added(note: "Note"):
     """Hook handler for add_cards_did_add_note."""
@@ -31,6 +31,19 @@ def _on_note_added(note: "Note"):
 
 
 add_cards_did_add_note.append(_on_note_added)
+
+
+# ─── Hook: Mining (Yomitan / AnkiConnect) ─────────────────────────
+
+import anki.hooks
+
+def _on_note_will_be_added(_col, note: "Note", _deck_id):
+    """Hook: note_will_be_added — fires for ALL note additions."""
+    from .card_processor import on_note_will_be_added
+    on_note_will_be_added(_col, note, _deck_id)
+
+
+anki.hooks.note_will_be_added.append(_on_note_will_be_added)
 
 
 # ─── Hook: Live fill on focus lost ────────────────────────────────

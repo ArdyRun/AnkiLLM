@@ -237,6 +237,7 @@ class SettingsDialog(QDialog):
         mappings[note_type_name] = {
             "source_field": fields[0],
             "system_prompt": "You are a helpful assistant that generates Anki flashcard content.",
+            "triggered_by": ["mining", "add_cards", "browse", "focus_lost", "toolbar"],
             "target_fields": [
                 {
                     "field_name": fields[1] if len(fields) > 1 else fields[0],
@@ -296,6 +297,33 @@ class SettingsDialog(QDialog):
             )
         )
         form.addRow("System Prompt:", system_prompt_edit)
+
+        # Trigger checkboxes
+        trigger_group = QGroupBox("Active Triggers")
+        trigger_layout = QHBoxLayout()
+        trigger_group.setLayout(trigger_layout)
+
+        current_triggers = mapping.get("triggered_by", ["mining", "add_cards", "browse", "focus_lost", "toolbar"])
+
+        trigger_defs = [
+            ("mining", "Mining (Yomitan)"),
+            ("add_cards", "Add Cards"),
+            ("browse", "Browse"),
+            ("focus_lost", "Focus Lost"),
+            ("toolbar", "Toolbar"),
+        ]
+
+        self._trigger_checkboxes = {}
+        for trigger_id, trigger_label in trigger_defs:
+            cb = QCheckBox(trigger_label)
+            cb.setChecked(trigger_id in current_triggers)
+            cb.toggled.connect(
+                lambda checked, tid=trigger_id: self._update_triggers(note_type_name, tid, checked)
+            )
+            trigger_layout.addWidget(cb)
+            self._trigger_checkboxes[trigger_id] = cb
+
+        form.addRow(trigger_group)
 
         self.mapping_layout.addWidget(group)
 
@@ -375,6 +403,18 @@ class SettingsDialog(QDialog):
         if note_type_name in mappings:
             mappings[note_type_name][key] = value
 
+    def _update_triggers(self, note_type_name: str, trigger_id: str, enabled: bool):
+        mappings = self.config.get("note_type_mappings", {})
+        if note_type_name not in mappings:
+            return
+        triggers = mappings[note_type_name].setdefault(
+            "triggered_by", ["mining", "add_cards", "browse", "focus_lost", "toolbar"]
+        )
+        if enabled and trigger_id not in triggers:
+            triggers.append(trigger_id)
+        elif not enabled and trigger_id in triggers:
+            triggers.remove(trigger_id)
+
     def _update_target_field(self, note_type_name: str, idx: int, key: str, value):
         mappings = self.config.get("note_type_mappings", {})
         if note_type_name in mappings:
@@ -423,12 +463,9 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout()
         tab.setLayout(layout)
 
-        group = QGroupBox("Auto-Fill Behavior")
+        group = QGroupBox("Batch Behavior")
         form = QFormLayout()
         group.setLayout(form)
-
-        self.auto_fill_cb = QCheckBox("Automatically fill fields when a new card is added")
-        form.addRow(self.auto_fill_cb)
 
         self.delay_spin = QSpinBox()
         self.delay_spin.setRange(0, 10000)
@@ -437,6 +474,15 @@ class SettingsDialog(QDialog):
         form.addRow("Delay between batch requests:", self.delay_spin)
 
         layout.addWidget(group)
+
+        info_label = QLabel(
+            "Trigger control is now per-mapping.\n"
+            "Go to Field Mappings tab to enable/disable triggers\n"
+            "(Mining, Add Cards, Browse, Focus Lost, Toolbar)"
+        )
+        info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(info_label)
+
         layout.addStretch()
 
         self.tabs.addTab(tab, "Behavior")
@@ -452,7 +498,6 @@ class SettingsDialog(QDialog):
         self.temperature_spin.setValue(c.get("temperature", 0.7))
         self.max_tokens_spin.setValue(c.get("max_tokens", 500))
         self.timeout_spin.setValue(c.get("timeout", 60))
-        self.auto_fill_cb.setChecked(c.get("auto_fill_on_new_card", True))
         self.delay_spin.setValue(c.get("delay_between_requests_ms", 500))
 
         # Load first note type mapping if available
@@ -468,7 +513,6 @@ class SettingsDialog(QDialog):
         self.config["temperature"] = self.temperature_spin.value()
         self.config["max_tokens"] = self.max_tokens_spin.value()
         self.config["timeout"] = self.timeout_spin.value()
-        self.config["auto_fill_on_new_card"] = self.auto_fill_cb.isChecked()
         self.config["delay_between_requests_ms"] = self.delay_spin.value()
 
         self.mw.addonManager.writeConfig(self._package, self.config)

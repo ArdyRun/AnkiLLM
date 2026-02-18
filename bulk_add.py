@@ -87,7 +87,7 @@ def _fill_selected_notes(nids: Sequence["NoteId"], parent: "Browser") -> None:
     for nid in nids:
         try:
             note = mw.col.get_note(nid)
-            mapping = should_process_note(note, config)
+            mapping = should_process_note(note, config, trigger="browse")
             if mapping is not None:
                 notes_and_mappings.append((note, mapping))
         except Exception:

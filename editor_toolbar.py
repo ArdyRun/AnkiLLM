@@ -60,7 +60,7 @@ def _llm_fill_note(editor: Editor, overwrite: bool = False) -> None:
 
     assert mw is not None
     config = get_config()
-    mapping = should_process_note(note, config)
+    mapping = should_process_note(note, config, trigger="toolbar")
     if mapping is None:
         tooltip("No field mapping configured for this note type.", parent=editor.widget)
         return
