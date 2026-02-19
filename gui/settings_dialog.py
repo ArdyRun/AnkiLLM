@@ -42,6 +42,9 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("LLM Field Generator — Settings")
         self.setMinimumSize(600, 500)
 
+        # Store settings per API mode
+        self._api_settings = {}
+
         self._setup_ui()
         self._load_config()
         self._setup_hooks()
@@ -103,43 +106,39 @@ class SettingsDialog(QDialog):
         tab.setLayout(layout)
 
         # API Settings Group
-        group = QGroupBox("Ollama Connection")
+        self.api_group = QGroupBox("API Connection")
         form = QFormLayout()
-        group.setLayout(form)
+        self.api_group.setLayout(form)
+
+        self.api_mode_combo = QComboBox()
+        self.api_mode_combo.addItems(["ollama", "groq", "gemini", "openrouter"])
+        self.api_mode_combo.currentTextChanged.connect(self._on_api_mode_changed)
+        form.addRow("API Mode:", self.api_mode_combo)
 
         self.base_url_edit = QLineEdit()
         self.base_url_edit.setPlaceholderText("http://localhost:11434")
         form.addRow("Base URL:", self.base_url_edit)
 
         self.api_key_edit = QLineEdit()
-        self.api_key_edit.setPlaceholderText("(optional, for OpenAI-compatible APIs)")
-        self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.api_key_edit.setPlaceholderText("(required for Groq, Gemini, OpenRouter)")
+        # Show API key as plain text (not masked) so user can verify it
+        self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Normal)
         form.addRow("API Key:", self.api_key_edit)
 
-        # Model selection
-        model_layout = QHBoxLayout()
+        # Model input (user types manually)
         self.model_edit = QLineEdit()
         self.model_edit.setPlaceholderText("llama3.2")
-        model_layout.addWidget(self.model_edit)
+        self.model_edit.setToolTip(
+            "Enter model name manually.\n\n"
+            "Examples:\n"
+            "Ollama: llama3.2, mistral\n"
+            "Groq: llama-3.3-70b-versatile, mixtral-8x7b-32768\n"
+            "Gemini: gemini-2.0-flash, gemini-1.5-pro\n"
+            "OpenRouter: anthropic/claude-3.5-sonnet, meta-llama/llama-3-70b-instruct"
+        )
+        form.addRow("Model:", self.model_edit)
 
-        self.refresh_models_btn = QPushButton("Refresh")
-        self.refresh_models_btn.setFixedWidth(80)
-        self.refresh_models_btn.clicked.connect(self._refresh_models)
-        model_layout.addWidget(self.refresh_models_btn)
-
-        form.addRow("Model:", model_layout)
-
-        # Model list (loaded from Ollama)
-        self.model_combo = QComboBox()
-        self.model_combo.addItem("(click Refresh to load models)")
-        self.model_combo.currentTextChanged.connect(self._on_model_selected)
-        form.addRow("Available Models:", self.model_combo)
-
-        self.api_mode_combo = QComboBox()
-        self.api_mode_combo.addItems(["ollama", "openai"])
-        form.addRow("API Mode:", self.api_mode_combo)
-
-        layout.addWidget(group)
+        layout.addWidget(self.api_group)
 
         # Generation Settings
         gen_group = QGroupBox("Generation Settings")
@@ -491,14 +490,26 @@ class SettingsDialog(QDialog):
 
     def _load_config(self):
         c = self.config
+        api_mode = c.get("api_mode", "ollama")
+        
+        # Initialize API settings storage with current config
+        self._api_settings[api_mode] = {
+            "base_url": c.get("api_base_url", "http://localhost:11434"),
+            "api_key": c.get("api_key", ""),
+            "model": c.get("model", "llama3.2"),
+        }
+        
+        self.api_mode_combo.setCurrentText(api_mode)
         self.base_url_edit.setText(c.get("api_base_url", "http://localhost:11434"))
         self.api_key_edit.setText(c.get("api_key", ""))
         self.model_edit.setText(c.get("model", "llama3.2"))
-        self.api_mode_combo.setCurrentText(c.get("api_mode", "ollama"))
         self.temperature_spin.setValue(c.get("temperature", 0.7))
         self.max_tokens_spin.setValue(c.get("max_tokens", 500))
         self.timeout_spin.setValue(c.get("timeout", 60))
         self.delay_spin.setValue(c.get("delay_between_requests_ms", 500))
+
+        # Trigger UI update based on API mode
+        self._on_api_mode_changed(api_mode)
 
         # Load first note type mapping if available
         note_type = self.note_type_combo.currentText()
@@ -506,87 +517,149 @@ class SettingsDialog(QDialog):
             self._load_mapping_ui(note_type)
 
     def _save_config(self):
-        self.config["api_base_url"] = self.base_url_edit.text().strip()
-        self.config["api_key"] = self.api_key_edit.text().strip()
-        self.config["model"] = self.model_edit.text().strip()
-        self.config["api_mode"] = self.api_mode_combo.currentText()
-        self.config["temperature"] = self.temperature_spin.value()
-        self.config["max_tokens"] = self.max_tokens_spin.value()
-        self.config["timeout"] = self.timeout_spin.value()
-        self.config["delay_between_requests_ms"] = self.delay_spin.value()
-
-        self.mw.addonManager.writeConfig(self._package, self.config)
-        tooltip("Settings saved!", parent=self)
+        """Save config and close dialog. Called by Save button."""
+        self._save_all_settings()
         self.accept()
 
     # ─── Actions ──────────────────────────────────────────────────
 
+    def _on_api_mode_changed(self, api_mode: str):
+        """Update UI based on selected API mode and save/load settings."""
+        # Save current settings before switching
+        current_mode = self.api_mode_combo.currentText()
+        if current_mode and hasattr(self, '_api_settings'):
+            self._save_current_api_settings()
+        
+        # Update group title
+        self.api_group.setTitle(f"{api_mode.capitalize()} Connection")
+        
+        # Load saved settings for this API mode, or use defaults
+        saved = self._api_settings.get(api_mode, {})
+        
+        if api_mode == "ollama":
+            self.base_url_edit.setEnabled(True)
+            self.base_url_edit.setText(saved.get("base_url", "http://localhost:11434"))
+            self.base_url_edit.setPlaceholderText("http://localhost:11434")
+            self.model_edit.setText(saved.get("model", "llama3.2"))
+            self.model_edit.setPlaceholderText("llama3.2")
+            self.api_key_edit.setText(saved.get("api_key", ""))
+        else:
+            self.base_url_edit.setEnabled(False)
+            self.base_url_edit.clear()
+            self.api_key_edit.setText(saved.get("api_key", ""))
+            self.model_edit.setText(saved.get("model", ""))
+            if api_mode == "groq":
+                self.model_edit.setPlaceholderText("llama-3.3-70b-versatile")
+            elif api_mode == "gemini":
+                self.model_edit.setPlaceholderText("gemini-2.0-flash")
+            elif api_mode == "openrouter":
+                self.model_edit.setPlaceholderText("anthropic/claude-3.5-sonnet")
+    
+    def _save_current_api_settings(self):
+        """Save current API settings to memory."""
+        current_mode = self.api_mode_combo.currentText()
+        if not current_mode:
+            return
+        
+        self._api_settings[current_mode] = {
+            "base_url": self.base_url_edit.text().strip(),
+            "api_key": self.api_key_edit.text().strip(),
+            "model": self.model_edit.text().strip(),
+        }
+
     def _test_connection(self):
         from ..llm_client import LLMClient
 
+        api_mode = self.api_mode_combo.currentText()
+        base_url = self.base_url_edit.text().strip()
+        
+        # Set default base URL for Ollama
+        if api_mode == "ollama":
+            base_url = base_url or "http://localhost:11434"
+        
         client = LLMClient(
-            base_url=self.base_url_edit.text().strip() or "http://localhost:11434",
+            base_url=base_url,
             api_key=self.api_key_edit.text().strip(),
+            api_mode=api_mode,
+            model=self.model_edit.text().strip() or "llama3.2",
         )
+        
         self.test_btn.setEnabled(False)
         self.test_btn.setText("Testing...")
-
-        if client.test_connection():
-            models = client.list_models()
-            model_list = ", ".join(models[:5]) if models else "(none found)"
+        
+        # Run test in background to avoid UI freeze
+        from aqt.operations import QueryOp
+        from aqt import mw
+        
+        def do_test(_col) -> tuple:
+            return client.test_connection()
+        
+        def on_done(result: tuple):
+            self.test_btn.setEnabled(True)
+            self.test_btn.setText("Test Connection")
+            
+            success, message = result
+            if success:
+                showInfo(
+                    f"✓ Connection Successful!\n\n{message}",
+                    parent=self,
+                )
+            else:
+                showInfo(
+                    f"✗ Connection Failed\n\n{message}",
+                    parent=self,
+                )
+        
+        def on_error(exc: Exception):
+            self.test_btn.setEnabled(True)
+            self.test_btn.setText("Test Connection")
             showInfo(
-                f"Connection successful!\n\nAvailable models: {model_list}",
+                f"✗ Test Error\n\n{str(exc)}",
                 parent=self,
             )
-            self._populate_model_combo(models)
-        else:
-            showInfo(
-                "Connection failed!\n\n"
-                "Make sure Ollama is running:\n"
-                "  ollama serve\n\n"
-                f"URL: {self.base_url_edit.text()}",
-                parent=self,
-            )
-
-        self.test_btn.setEnabled(True)
-        self.test_btn.setText("Test Connection")
-
-    def _refresh_models(self):
-        from ..llm_client import LLMClient
-
-        client = LLMClient(
-            base_url=self.base_url_edit.text().strip() or "http://localhost:11434",
-            api_key=self.api_key_edit.text().strip(),
-        )
-        models = client.list_models()
-        if models:
-            self._populate_model_combo(models)
-            tooltip(f"Found {len(models)} model(s)", parent=self)
-        else:
-            tooltip("No models found. Is Ollama running?", parent=self)
-
-    def _populate_model_combo(self, models: list):
-        self.model_combo.clear()
-        if models:
-            for m in models:
-                self.model_combo.addItem(m)
-        else:
-            self.model_combo.addItem("(no models available)")
-
-    def _on_model_selected(self, text: str):
-        if text and not text.startswith("("):
-            self.model_edit.setText(text)
+        
+        QueryOp(
+            parent=self,
+            op=do_test,
+            success=on_done,
+        ).failure(on_error).without_collection().run_in_background()
 
     # ─── Lifecycle ────────────────────────────────────────────────
 
     def _on_close(self):
+        """Cleanup hooks and save window geometry."""
         saveGeom(self, "llmFieldGenSettings")
         self._teardown_hooks()
 
+    def _save_all_settings(self):
+        """Save all settings to config file. Only called on explicit Save."""
+        # Save current API settings
+        self._save_current_api_settings()
+        
+        # Get the currently selected API mode's settings
+        api_mode = self.api_mode_combo.currentText()
+        saved = self._api_settings.get(api_mode, {})
+        
+        self.config["api_base_url"] = saved.get("base_url", "")
+        self.config["api_key"] = saved.get("api_key", "")
+        self.config["model"] = saved.get("model", "")
+        self.config["api_mode"] = api_mode
+        self.config["temperature"] = self.temperature_spin.value()
+        self.config["max_tokens"] = self.max_tokens_spin.value()
+        self.config["timeout"] = self.timeout_spin.value()
+        self.config["delay_between_requests_ms"] = self.delay_spin.value()
+        
+        # Write to config file
+        self.mw.addonManager.writeConfig(self._package, self.config)
+
     def reject(self):
+        """Called when user clicks Cancel. Don't save config."""
         self._on_close()
         super().reject()
 
     def accept(self):
+        """Called when user clicks Save. Save config and close."""
+        self._save_all_settings()
+        tooltip("Settings saved!", parent=self)
         self._on_close()
         super().accept()

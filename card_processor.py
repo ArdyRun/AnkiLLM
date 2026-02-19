@@ -44,6 +44,7 @@ def get_llm_client(config: dict) -> LLMClient:
         max_tokens=config.get("max_tokens", 500),
         api_key=config.get("api_key", ""),
         timeout=config.get("timeout", 60),
+        api_mode=config.get("api_mode", "ollama"),
     )
 
 
@@ -142,13 +143,19 @@ def generate_fields_for_note(
         prompt = build_prompt(prompt_template, note_fields)
 
         try:
-            if config.get("api_mode", "ollama") == "openai":
-                result = client.generate_openai(prompt, system_prompt)
+            api_mode = config.get("api_mode", "ollama")
+            if api_mode == "groq":
+                result = client.generate_groq(prompt, system_prompt)
+            elif api_mode == "gemini":
+                result = client.generate_gemini(prompt, system_prompt)
+            elif api_mode == "openrouter":
+                result = client.generate_openrouter(prompt, system_prompt)
             else:
                 result = client.generate(prompt, system_prompt)
             generated[field_name] = result
-        except LLMError:
-            pass  # Skip failed fields silently
+        except LLMError as e:
+            # Log error but continue with other fields
+            print(f"[LLM Fill] Error generating field '{field_name}': {e}")
 
     return generated
 
