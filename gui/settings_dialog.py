@@ -47,6 +47,7 @@ class CheckComboBox(QComboBox):
         super().__init__(parent)
         self._selected_items: List[str] = []
         self._all_items: List[str] = []
+        self.setEditable(True)  # Make editable to set custom text
         
         # Create popup with list widget
         self.list_widget = QListWidget()
@@ -94,9 +95,9 @@ class CheckComboBox(QComboBox):
     def _update_display_text(self):
         """Update the display text to show selected items."""
         if self._selected_items:
-            self.setText(", ".join(self._selected_items))
+            self.setCurrentText(", ".join(self._selected_items))
         else:
-            self.setText("(Select fields)")
+            self.setCurrentText("(Select fields)")
     
     def setItems(self, items: List[str]):
         """Set the list of available items."""
