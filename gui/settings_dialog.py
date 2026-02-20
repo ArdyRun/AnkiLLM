@@ -1,7 +1,7 @@
 # Anki LLM Field Generator
 # Settings dialog — QDialog-based settings with field mapping
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, List
 
 from aqt.qt import (
     QDialog,
@@ -23,11 +23,128 @@ from aqt.qt import (
     QMessageBox,
     QSizePolicy,
     Qt,
+    QFrame,
+    QListWidget,
+    QListWidgetItem,
 )
 from aqt.utils import restoreGeom, saveGeom, tooltip, showInfo
 
 if TYPE_CHECKING:
     from aqt.main import AnkiQt
+
+
+# ─── Custom Widgets ────────────────────────────────────────────────
+
+
+class CheckComboBox(QComboBox):
+    """ComboBox with checklist functionality for multiple selection.
+    
+    Displays selected items as comma-separated values.
+    Opens a dropdown list with checkboxes when clicked.
+    """
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._selected_items: List[str] = []
+        self._all_items: List[str] = []
+        
+        # Create popup with list widget
+        self.list_widget = QListWidget()
+        self.list_widget.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        
+        # Connect item changed signal
+        self.list_widget.itemClicked.connect(self._on_item_clicked)
+        
+        self.setModel(self.list_widget.model())
+        self.setView(self.list_widget)
+        
+        # Prevent popup from closing on item click
+        self.installEventFilter(self)
+    
+    def eventFilter(self, obj, event):
+        """Prevent popup from closing when clicking items."""
+        from aqt.qt import QEvent, QMouseEvent
+        if event.type() == QEvent.Type.MouseButtonPress:
+            # Don't close on mouse press
+            pass
+        elif event.type() == QEvent.Type.Wheel:
+            # Disable mouse wheel scrolling
+            return True
+        return super().eventFilter(obj, event)
+    
+    def _on_item_clicked(self, item: QListWidgetItem):
+        """Toggle item selection when clicked."""
+        row = self.list_widget.row(item)
+        widget = self.list_widget.itemWidget(item)
+        
+        if widget and isinstance(widget, QCheckBox):
+            widget.setChecked(not widget.isChecked())
+            self._update_selected()
+            self._update_display_text()
+    
+    def _update_selected(self):
+        """Update the list of selected items."""
+        self._selected_items = []
+        for row in range(self.list_widget.count()):
+            item = self.list_widget.item(row)
+            widget = self.list_widget.itemWidget(item)
+            if widget and isinstance(widget, QCheckBox) and widget.isChecked():
+                self._selected_items.append(item.text())
+    
+    def _update_display_text(self):
+        """Update the display text to show selected items."""
+        if self._selected_items:
+            self.setText(", ".join(self._selected_items))
+        else:
+            self.setText("(Select fields)")
+    
+    def setItems(self, items: List[str]):
+        """Set the list of available items."""
+        self._all_items = items
+        self._selected_items = []
+        self.clear()
+        
+        for item_text in items:
+            item = QListWidgetItem(item_text)
+            checkbox = QCheckBox(item_text)
+            checkbox.setChecked(False)
+            checkbox.setStyleSheet("background: transparent;")
+            
+            self.list_widget.addItem(item)
+            self.list_widget.setItemWidget(item, checkbox)
+            
+            # Adjust item height
+            item.setSizeHint(checkbox.sizeHint())
+        
+        self._update_display_text()
+    
+    def setCheckedItems(self, items: List[str]):
+        """Set which items should be checked."""
+        for row in range(self.list_widget.count()):
+            item = self.list_widget.item(row)
+            widget = self.list_widget.itemWidget(item)
+            if widget and isinstance(widget, QCheckBox):
+                is_checked = item.text() in items
+                widget.setChecked(is_checked)
+        
+        self._update_selected()
+        self._update_display_text()
+    
+    def getCheckedItems(self) -> List[str]:
+        """Get list of checked items."""
+        return self._selected_items.copy()
+    
+    def showPopup(self):
+        """Override to ensure popup shows properly."""
+        super().showPopup()
+        # Set focus to list widget
+        self.list_widget.setFocus()
+    
+    def hidePopup(self):
+        """Override to update display when popup closes."""
+        self._update_selected()
+        self._update_display_text()
+        super().hidePopup()
 
 
 class SettingsDialog(QDialog):
@@ -234,7 +351,7 @@ class SettingsDialog(QDialog):
             return
 
         mappings[note_type_name] = {
-            "source_field": fields[0],
+            "source_fields": [fields[0]],  # New format: array of source fields
             "system_prompt": "You are a helpful assistant that generates Anki flashcard content.",
             "triggered_by": ["mining", "add_cards", "browse", "focus_lost", "toolbar"],
             "target_fields": [
@@ -273,18 +390,24 @@ class SettingsDialog(QDialog):
         form = QFormLayout()
         group.setLayout(form)
 
-        # Source field
-        source_combo = QComboBox()
-        source_combo.addItems(fields)
+        # Source fields (multiple selection with CheckComboBox)
+        source_combo = CheckComboBox()
+        source_combo.setItems(fields)
+        
+        # Support both old (source_field) and new (source_fields) format
         current_source = mapping.get("source_field", "")
-        if current_source in fields:
-            source_combo.setCurrentText(current_source)
-        source_combo.setProperty("mapping_key", "source_field")
-        source_combo.setProperty("note_type", note_type_name)
+        current_sources = mapping.get("source_fields", [])
+        
+        # Convert old format to new format for backward compatibility
+        if current_source and not current_sources:
+            current_sources = [current_source]
+        
+        source_combo.setCheckedItems(current_sources)
+        source_combo.setToolTip("Select one or more source fields. Hold Ctrl to select multiple.")
         source_combo.currentTextChanged.connect(
-            lambda text: self._update_mapping_value(note_type_name, "source_field", text)
+            lambda: self._update_source_fields(note_type_name, source_combo.getCheckedItems())
         )
-        form.addRow("Source Field (input):", source_combo)
+        form.addRow("Source Fields (input):", source_combo)
 
         # System prompt
         system_prompt_edit = QPlainTextEdit()
@@ -401,6 +524,16 @@ class SettingsDialog(QDialog):
         mappings = self.config.setdefault("note_type_mappings", {})
         if note_type_name in mappings:
             mappings[note_type_name][key] = value
+
+    def _update_source_fields(self, note_type_name: str, fields: List[str]):
+        """Update source_fields array in mapping config."""
+        mappings = self.config.setdefault("note_type_mappings", {})
+        if note_type_name in mappings:
+            # Store as array (new format)
+            mappings[note_type_name]["source_fields"] = fields
+            # Remove old format key if exists
+            if "source_field" in mappings[note_type_name]:
+                del mappings[note_type_name]["source_field"]
 
     def _update_triggers(self, note_type_name: str, trigger_id: str, enabled: bool):
         mappings = self.config.get("note_type_mappings", {})

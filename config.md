@@ -20,6 +20,21 @@
 
 **note_type_mappings** [object]: Per-note-type field mapping configuration. Best configured via the Settings dialog (Tools → LLM Field Generator Settings).
 
+### Field Mappings Structure
+
+Each note type mapping contains:
+
+**source_fields** [array]: List of field names used as input for LLM generation. Multiple fields can be selected and all will be available in prompt templates via `{{FieldName}}`.
+
+**target_fields** [array]: List of target field configurations, each containing:
+- `field_name`: The target field to fill
+- `prompt_template`: Template with `{{FieldName}}` placeholders
+- `overwrite`: Whether to overwrite existing content
+
+**system_prompt** [string]: System prompt for the LLM.
+
+**triggered_by** [array]: List of triggers that activate this mapping. Options: `mining`, `add_cards`, `browse`, `focus_lost`, `toolbar`.
+
 ---
 
 ### Quick Start
@@ -29,5 +44,18 @@
 3. Open Tools → LLM Field Generator Settings
 4. Click "Test Connection" to verify Ollama is running
 5. Go to "Field Mappings" tab, select your note type, click "Add Mapping"
-6. Configure source field, target field(s), and prompt templates
+6. Configure source fields (multiple selection supported), target field(s), and prompt templates
 7. Save and start adding cards!
+
+### Multiple Source Fields Example
+
+For a note type with fields: `Word`, `Context`, `Definition`, `Examples`
+
+You can select multiple source fields like `Word` and `Context`, then use them in the prompt:
+
+```
+Generate a definition for the word "{{Word}}" used in this context: "{{Context}}".
+Also provide 2 example sentences.
+```
+
+All configured fields are available in prompt templates, even if not selected as source fields.

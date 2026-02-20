@@ -91,12 +91,24 @@ def should_process_note(
 
     # Validate that fields exist on this note type
     field_names = [f["name"] for f in note_type["flds"]]
+    
+    # Support both old (source_field) and new (source_fields) format
     source_field = mapping.get("source_field", "")
-    target_fields = mapping.get("target_fields", [])
-
-    if source_field not in field_names:
+    source_fields = mapping.get("source_fields", [])
+    
+    # Convert old format to new format for backward compatibility
+    if source_field and not source_fields:
+        source_fields = [source_field]
+    
+    if not source_fields:
         return None
-
+    
+    # Validate all source fields exist
+    for sf in source_fields:
+        if sf not in field_names:
+            return None
+    
+    target_fields = mapping.get("target_fields", [])
     valid_targets = [t for t in target_fields if t.get("field_name", "") in field_names]
     if not valid_targets:
         return None
@@ -121,12 +133,26 @@ def generate_fields_for_note(
         Dict of {field_name: generated_text} for fields that were generated.
     """
     client = get_llm_client(config)
-    source_field = mapping["source_field"]
+    
+    # Support both old (source_field) and new (source_fields) format
+    source_field = mapping.get("source_field", "")
+    source_fields = mapping.get("source_fields", [])
+    
+    # Convert old format to new format for backward compatibility
+    if source_field and not source_fields:
+        source_fields = [source_field]
+    
     target_fields = mapping.get("target_fields", [])
     system_prompt = mapping.get("system_prompt", "")
 
-    source_content = note[source_field]
-    if not source_content.strip():
+    # Check if at least one source field has content
+    has_source_content = False
+    for sf in source_fields:
+        if note[sf].strip():
+            has_source_content = True
+            break
+    
+    if not has_source_content:
         return {}
 
     note_fields = get_note_fields_dict(note)
@@ -283,19 +309,30 @@ def on_focus_lost(changed: bool, note: "Note", field_idx: int) -> bool:
     if mapping is None:
         return changed
 
-    # Only trigger if the unfocused field is the source field
+    # Support both old (source_field) and new (source_fields) format
     source_field = mapping.get("source_field", "")
+    source_fields = mapping.get("source_fields", [])
+    if source_field and not source_fields:
+        source_fields = [source_field]
+    
     try:
         field_names = note.keys()
         unfocused_field = field_names[field_idx]
     except (IndexError, KeyError):
         return changed
 
-    if unfocused_field != source_field:
+    # Only trigger if the unfocused field is one of the source fields
+    if unfocused_field not in source_fields:
         return changed
 
-    # Don't trigger if source is empty
-    if not note[source_field].strip():
+    # Don't trigger if all source fields are empty
+    has_source_content = False
+    for sf in source_fields:
+        if note[sf].strip():
+            has_source_content = True
+            break
+    
+    if not has_source_content:
         return changed
 
     # Check if at least one target field needs filling
@@ -430,10 +467,15 @@ def find_notes_with_empty_targets(
     results = []
 
     for note_type_name, mapping in mappings.items():
+        # Support both old (source_field) and new (source_fields) format
         source_field = mapping.get("source_field", "")
+        source_fields = mapping.get("source_fields", [])
+        if source_field and not source_fields:
+            source_fields = [source_field]
+        
         target_fields = mapping.get("target_fields", [])
 
-        if not source_field or not target_fields:
+        if not source_fields or not target_fields:
             continue
 
         for target in target_fields:
@@ -455,7 +497,9 @@ def find_notes_with_empty_targets(
             for nid in note_ids:
                 try:
                     note = mw.col.get_note(nid)
-                    if note[source_field].strip():
+                    # Check if at least one source field has content
+                    has_source = any(note[sf].strip() for sf in source_fields)
+                    if has_source:
                         results.append((note, mapping))
                 except Exception:
                     continue
