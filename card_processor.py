@@ -23,6 +23,9 @@ if TYPE_CHECKING:
 
 ADDON_NAME = "LLM Field Generator"
 
+# Flag to prevent re-entrancy during batch operations
+_is_processing = False
+
 
 # ─── Config Helpers ────────────────────────────────────────────────
 
@@ -221,6 +224,12 @@ def _apply_and_save_batch_op(
 
 def _run_async_fill(note: "Note", trigger: str):
     """Common async fill: QueryOp (LLM) → CollectionOp (save+undo)."""
+    global _is_processing
+    
+    # Prevent re-entrancy
+    if _is_processing:
+        return
+    
     assert mw is not None
     config = get_config()
 
@@ -228,11 +237,15 @@ def _run_async_fill(note: "Note", trigger: str):
     if mapping is None:
         return
 
+    _is_processing = True
+
     def do_llm_call(_col) -> dict:
         return generate_fields_for_note(note, mapping, config)
 
     def on_llm_done(generated: dict):
+        global _is_processing
         if not generated:
+            _is_processing = False
             return
         CollectionOp(
             parent=mw,
@@ -240,9 +253,12 @@ def _run_async_fill(note: "Note", trigger: str):
         ).success(
             lambda out: tooltip("LLM fields filled!", parent=mw),
         ).run_in_background()
+        _is_processing = False
 
     def on_llm_error(exc: Exception):
+        global _is_processing
         tooltip(f"LLM Fill error: {exc}", parent=mw)
+        _is_processing = False
 
     QueryOp(
         parent=mw,
@@ -302,6 +318,12 @@ def on_focus_lost(changed: bool, note: "Note", field_idx: int) -> bool:
 
     Returns changed flag immediately (does not block for LLM).
     """
+    global _is_processing
+    
+    # Prevent re-entrancy
+    if _is_processing:
+        return changed
+    
     assert mw is not None
     config = get_config()
 
@@ -314,7 +336,7 @@ def on_focus_lost(changed: bool, note: "Note", field_idx: int) -> bool:
     source_fields = mapping.get("source_fields", [])
     if source_field and not source_fields:
         source_fields = [source_field]
-    
+
     try:
         field_names = note.keys()
         unfocused_field = field_names[field_idx]
@@ -331,7 +353,7 @@ def on_focus_lost(changed: bool, note: "Note", field_idx: int) -> bool:
         if note[sf].strip():
             has_source_content = True
             break
-    
+
     if not has_source_content:
         return changed
 
@@ -351,18 +373,22 @@ def on_focus_lost(changed: bool, note: "Note", field_idx: int) -> bool:
 
     # Async LLM call: two-phase approach
     editor_ref = _current_editor
+    _is_processing = True
 
     def do_llm(_col) -> dict:
         return generate_fields_for_note(note, mapping, config)
 
     def on_done(generated: dict):
+        global _is_processing
         if not generated:
+            _is_processing = False
             return
 
         def save_op(col: Collection) -> OpChanges:
             return _apply_and_save_op(col, note, generated)
 
         def on_saved(out):
+            global _is_processing
             tooltip("LLM fields filled!", parent=mw)
             # Reload the editor to show updated fields
             if editor_ref and hasattr(editor_ref, 'loadNoteKeepingFocus'):
@@ -370,6 +396,7 @@ def on_focus_lost(changed: bool, note: "Note", field_idx: int) -> bool:
                     editor_ref.loadNoteKeepingFocus()
                 except Exception:
                     pass
+            _is_processing = False
 
         CollectionOp(parent=mw, op=save_op).success(on_saved).run_in_background()
 
@@ -378,10 +405,16 @@ def on_focus_lost(changed: bool, note: "Note", field_idx: int) -> bool:
         op=do_llm,
         success=on_done,
     ).failure(
-        lambda exc: tooltip(f"LLM Fill error: {exc}", parent=mw),
+        lambda exc: tooltip(f"LLM Fill error: {exc}", parent=mw) or reset_processing(),
     ).without_collection().run_in_background()
 
     return changed
+
+
+def reset_processing():
+    """Reset the processing flag."""
+    global _is_processing
+    _is_processing = False
 
 
 # ─── Batch Fill ────────────────────────────────────────────────────

@@ -36,7 +36,11 @@ class LLMClient:
         timeout: int = 60,
         api_mode: str = "ollama",
     ):
-        self.base_url = base_url.rstrip("/")
+        # Set default base_url for Ollama if empty
+        if api_mode == "ollama":
+            self.base_url = (base_url or "http://localhost:11434").rstrip("/")
+        else:
+            self.base_url = base_url.rstrip("/") if base_url else ""
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -313,7 +317,7 @@ class LLMClient:
             req = urllib.request.Request(url, method="GET")
             with urllib.request.urlopen(req, timeout=10):
                 pass
-            
+
             # Then test the model
             payload = {
                 "model": self.model,
@@ -330,7 +334,25 @@ class LLMClient:
                     return True, f"Ollama connected. Model '{self.model}' is working."
                 return False, "Unexpected response from Ollama"
         except urllib.error.URLError as e:
-            return False, f"Cannot connect to Ollama at {self.base_url}\nError: {e.reason}"
+            error_msg = f"Cannot connect to Ollama at {self.base_url}\nError: {e.reason}"
+            
+            # Provide helpful troubleshooting tips
+            if "timed out" in str(e.reason).lower() or "timeout" in str(e.reason).lower():
+                error_msg += "\n\nTroubleshooting:\n"
+                error_msg += "1. Make sure Ollama is running\n"
+                error_msg += "   → Run: ollama serve\n"
+                error_msg += "2. Check if model is pulled\n"
+                error_msg += f"   → Run: ollama pull {self.model}\n"
+                error_msg += "3. Try http://127.0.0.1:11434 instead of localhost\n"
+                error_msg += "4. Check Windows Firewall settings"
+            elif "refused" in str(e.reason).lower():
+                error_msg += "\n\nTroubleshooting:\n"
+                error_msg += "1. Ollama server is not running\n"
+                error_msg += "   → Run: ollama serve\n"
+                error_msg += "2. Check if Ollama is installed\n"
+                error_msg += "   → Download from: https://ollama.ai"
+            
+            return False, error_msg
         except urllib.error.HTTPError as e:
             return False, f"HTTP {e.code}: {e.reason}"
         except Exception as e:

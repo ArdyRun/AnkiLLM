@@ -52,7 +52,19 @@ class BulkLLMWorker(QThread):
                     self.tick.emit(i, total, "Cancelled.")
                     return
 
-                source = note[mapping["source_field"]]
+                # Support both old (source_field) and new (source_fields) format
+                source_field = mapping.get("source_field", "")
+                source_fields = mapping.get("source_fields", [])
+                if source_field and not source_fields:
+                    source_fields = [source_field]
+                
+                # Get content from first non-empty source field for preview
+                source = ""
+                for sf in source_fields:
+                    if note[sf].strip():
+                        source = note[sf]
+                        break
+                
                 # Truncate long source text for display
                 preview = source[:30] + "..." if len(source) > 30 else source
                 self.tick.emit(i, total, f"[{i+1}/{total}] Generating: {preview}")

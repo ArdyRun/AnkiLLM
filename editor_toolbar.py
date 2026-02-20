@@ -54,6 +54,12 @@ def _llm_fill_note(editor: Editor, overwrite: bool = False) -> None:
     1. QueryOp: LLM API call (no collection lock)
     2. CollectionOp: save results + undo
     """
+    from .card_processor import _is_processing, reset_processing
+    
+    # Prevent re-entrancy
+    if _is_processing:
+        return
+    
     note = editor.note
     if note is None:
         return
@@ -74,6 +80,7 @@ def _llm_fill_note(editor: Editor, overwrite: bool = False) -> None:
     def on_done(generated: dict):
         if not generated:
             tooltip("Nothing to generate (all fields already filled).", parent=editor.widget)
+            reset_processing()
             return
 
         def save_op(col: Collection) -> OpChanges:
@@ -90,6 +97,7 @@ def _llm_fill_note(editor: Editor, overwrite: bool = False) -> None:
                 editor.loadNote(focusTo=0)
             else:
                 editor.loadNoteKeepingFocus()
+            reset_processing()
 
         CollectionOp(
             parent=editor.widget,
@@ -98,6 +106,7 @@ def _llm_fill_note(editor: Editor, overwrite: bool = False) -> None:
 
     def on_error(exc: Exception):
         tooltip(f"LLM {action} error: {exc}", parent=editor.widget)
+        reset_processing()
 
     QueryOp(
         parent=editor.widget,

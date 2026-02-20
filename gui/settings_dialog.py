@@ -75,7 +75,6 @@ class CheckComboBox(QComboBox):
     
     def _on_item_clicked(self, item: QListWidgetItem):
         """Toggle item selection when clicked."""
-        row = self.list_widget.row(item)
         widget = self.list_widget.itemWidget(item)
         
         if widget and isinstance(widget, QCheckBox):
@@ -90,7 +89,8 @@ class CheckComboBox(QComboBox):
             item = self.list_widget.item(row)
             widget = self.list_widget.itemWidget(item)
             if widget and isinstance(widget, QCheckBox) and widget.isChecked():
-                self._selected_items.append(item.text())
+                # Get text from checkbox, not from item
+                self._selected_items.append(widget.text())
     
     def _update_display_text(self):
         """Update the display text to show selected items."""
@@ -106,15 +106,16 @@ class CheckComboBox(QComboBox):
         self.clear()
         
         for item_text in items:
-            item = QListWidgetItem(item_text)
+            # Create item without text (checkbox will show the text)
+            item = QListWidgetItem()
             checkbox = QCheckBox(item_text)
             checkbox.setChecked(False)
-            checkbox.setStyleSheet("background: transparent;")
+            checkbox.setStyleSheet("background: transparent; margin: 2px;")
             
             self.list_widget.addItem(item)
             self.list_widget.setItemWidget(item, checkbox)
             
-            # Adjust item height
+            # Adjust item height to fit checkbox
             item.setSizeHint(checkbox.sizeHint())
         
         self._update_display_text()
@@ -125,9 +126,10 @@ class CheckComboBox(QComboBox):
             item = self.list_widget.item(row)
             widget = self.list_widget.itemWidget(item)
             if widget and isinstance(widget, QCheckBox):
-                is_checked = item.text() in items
+                # Get text from checkbox, not from item
+                is_checked = widget.text() in items
                 widget.setChecked(is_checked)
-        
+
         self._update_selected()
         self._update_display_text()
     
